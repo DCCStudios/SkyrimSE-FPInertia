@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "fp-inertia",
+  "version-semver": "1.0.0",
+  "description": "SKSE plugin that adds spring interpolation inertia to first-person hands and weapons",
+  "dependencies": [
+    "spdlog",
+    "simpleini",
+    "rapidcsv",
+    "nlohmann-json"
+  ],
+  "builtin-baseline": "9984495d199a6ce606ef2249a8514c752b37d6f8"
+}
+
