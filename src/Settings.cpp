@@ -77,6 +77,9 @@ void WeaponInertiaSettings::Load(CSimpleIniA& a_ini, const char* a_section)
 	jumpImpulseY = static_cast<float>(a_ini.GetDoubleValue(a_section, "fJumpImpulseY", jumpImpulseY));
 	jumpImpulseZ = static_cast<float>(a_ini.GetDoubleValue(a_section, "fJumpImpulseZ", jumpImpulseZ));
 	jumpRotImpulse = static_cast<float>(a_ini.GetDoubleValue(a_section, "fJumpRotImpulse", jumpRotImpulse));
+	fallImpulseY = static_cast<float>(a_ini.GetDoubleValue(a_section, "fFallImpulseY", fallImpulseY));
+	fallImpulseZ = static_cast<float>(a_ini.GetDoubleValue(a_section, "fFallImpulseZ", fallImpulseZ));
+	fallRotImpulse = static_cast<float>(a_ini.GetDoubleValue(a_section, "fFallRotImpulse", fallRotImpulse));
 	jumpStiffness = static_cast<float>(a_ini.GetDoubleValue(a_section, "fJumpStiffness", jumpStiffness));
 	jumpDamping = static_cast<float>(a_ini.GetDoubleValue(a_section, "fJumpDamping", jumpDamping));
 	landImpulseY = static_cast<float>(a_ini.GetDoubleValue(a_section, "fLandImpulseY", landImpulseY));
@@ -88,6 +91,23 @@ void WeaponInertiaSettings::Load(CSimpleIniA& a_ini, const char* a_section)
 	
 	// === PIVOT POINT ===
 	pivotPoint = static_cast<int>(a_ini.GetLongValue(a_section, "iPivotPoint", pivotPoint));
+	
+	// === STANCE MULTIPLIERS ===
+	enableStanceMultipliers = a_ini.GetBoolValue(a_section, "bEnableStanceMultipliers", enableStanceMultipliers);
+	stanceMultipliers[0] = static_cast<float>(a_ini.GetDoubleValue(a_section, "fStanceMultNeutral", stanceMultipliers[0]));
+	stanceMultipliers[1] = static_cast<float>(a_ini.GetDoubleValue(a_section, "fStanceMultLow", stanceMultipliers[1]));
+	stanceMultipliers[2] = static_cast<float>(a_ini.GetDoubleValue(a_section, "fStanceMultMid", stanceMultipliers[2]));
+	stanceMultipliers[3] = static_cast<float>(a_ini.GetDoubleValue(a_section, "fStanceMultHigh", stanceMultipliers[3]));
+
+	// Per-stance invert options
+	stanceInvertCamera[0] = a_ini.GetBoolValue(a_section, "bStanceInvertCameraNeutral", stanceInvertCamera[0]);
+	stanceInvertCamera[1] = a_ini.GetBoolValue(a_section, "bStanceInvertCameraLow", stanceInvertCamera[1]);
+	stanceInvertCamera[2] = a_ini.GetBoolValue(a_section, "bStanceInvertCameraMid", stanceInvertCamera[2]);
+	stanceInvertCamera[3] = a_ini.GetBoolValue(a_section, "bStanceInvertCameraHigh", stanceInvertCamera[3]);
+	stanceInvertMovement[0] = a_ini.GetBoolValue(a_section, "bStanceInvertMovementNeutral", stanceInvertMovement[0]);
+	stanceInvertMovement[1] = a_ini.GetBoolValue(a_section, "bStanceInvertMovementLow", stanceInvertMovement[1]);
+	stanceInvertMovement[2] = a_ini.GetBoolValue(a_section, "bStanceInvertMovementMid", stanceInvertMovement[2]);
+	stanceInvertMovement[3] = a_ini.GetBoolValue(a_section, "bStanceInvertMovementHigh", stanceInvertMovement[3]);
 	
 	// Clamp camera values
 	stiffness = std::clamp(stiffness, 10.0f, 1000.0f);
@@ -127,6 +147,9 @@ void WeaponInertiaSettings::Load(CSimpleIniA& a_ini, const char* a_section)
 	jumpImpulseY = std::clamp(jumpImpulseY, 0.0f, 30.0f);
 	jumpImpulseZ = std::clamp(jumpImpulseZ, 0.0f, 30.0f);
 	jumpRotImpulse = std::clamp(jumpRotImpulse, 0.0f, 30.0f);
+	fallImpulseY = std::clamp(fallImpulseY, 0.0f, 30.0f);
+	fallImpulseZ = std::clamp(fallImpulseZ, 0.0f, 30.0f);
+	fallRotImpulse = std::clamp(fallRotImpulse, 0.0f, 30.0f);
 	jumpStiffness = std::clamp(jumpStiffness, 10.0f, 200.0f);
 	jumpDamping = std::clamp(jumpDamping, 1.0f, 20.0f);
 	landImpulseY = std::clamp(landImpulseY, 0.0f, 30.0f);
@@ -138,6 +161,12 @@ void WeaponInertiaSettings::Load(CSimpleIniA& a_ini, const char* a_section)
 	
 	// Clamp pivot (0=Chest, 1=RightHand, 2=LeftHand, 3=Weapon, 4=BothClavicles, 5=BothClaviclesOffset)
 	pivotPoint = std::clamp(pivotPoint, 0, 5);
+	
+	// Clamp stance multipliers (0 = no inertia, 5 = 5x intensity)
+	stanceMultipliers[0] = std::clamp(stanceMultipliers[0], 0.0f, 5.0f);
+	stanceMultipliers[1] = std::clamp(stanceMultipliers[1], 0.0f, 5.0f);
+	stanceMultipliers[2] = std::clamp(stanceMultipliers[2], 0.0f, 5.0f);
+	stanceMultipliers[3] = std::clamp(stanceMultipliers[3], 0.0f, 5.0f);
 }
 
 void WeaponInertiaSettings::Save(CSimpleIniA& a_ini, const char* a_section) const
@@ -190,6 +219,9 @@ void WeaponInertiaSettings::Save(CSimpleIniA& a_ini, const char* a_section) cons
 	a_ini.SetDoubleValue(a_section, "fJumpImpulseY", jumpImpulseY);
 	a_ini.SetDoubleValue(a_section, "fJumpImpulseZ", jumpImpulseZ);
 	a_ini.SetDoubleValue(a_section, "fJumpRotImpulse", jumpRotImpulse);
+	a_ini.SetDoubleValue(a_section, "fFallImpulseY", fallImpulseY);
+	a_ini.SetDoubleValue(a_section, "fFallImpulseZ", fallImpulseZ);
+	a_ini.SetDoubleValue(a_section, "fFallRotImpulse", fallRotImpulse);
 	a_ini.SetDoubleValue(a_section, "fJumpStiffness", jumpStiffness);
 	a_ini.SetDoubleValue(a_section, "fJumpDamping", jumpDamping);
 	a_ini.SetDoubleValue(a_section, "fLandImpulseY", landImpulseY);
@@ -201,6 +233,23 @@ void WeaponInertiaSettings::Save(CSimpleIniA& a_ini, const char* a_section) cons
 	
 	// === PIVOT POINT ===
 	a_ini.SetLongValue(a_section, "iPivotPoint", pivotPoint);
+	
+	// === STANCE MULTIPLIERS ===
+	a_ini.SetBoolValue(a_section, "bEnableStanceMultipliers", enableStanceMultipliers);
+	a_ini.SetDoubleValue(a_section, "fStanceMultNeutral", stanceMultipliers[0]);
+	a_ini.SetDoubleValue(a_section, "fStanceMultLow", stanceMultipliers[1]);
+	a_ini.SetDoubleValue(a_section, "fStanceMultMid", stanceMultipliers[2]);
+	a_ini.SetDoubleValue(a_section, "fStanceMultHigh", stanceMultipliers[3]);
+
+	// Per-stance invert options
+	a_ini.SetBoolValue(a_section, "bStanceInvertCameraNeutral", stanceInvertCamera[0]);
+	a_ini.SetBoolValue(a_section, "bStanceInvertCameraLow", stanceInvertCamera[1]);
+	a_ini.SetBoolValue(a_section, "bStanceInvertCameraMid", stanceInvertCamera[2]);
+	a_ini.SetBoolValue(a_section, "bStanceInvertCameraHigh", stanceInvertCamera[3]);
+	a_ini.SetBoolValue(a_section, "bStanceInvertMovementNeutral", stanceInvertMovement[0]);
+	a_ini.SetBoolValue(a_section, "bStanceInvertMovementLow", stanceInvertMovement[1]);
+	a_ini.SetBoolValue(a_section, "bStanceInvertMovementMid", stanceInvertMovement[2]);
+	a_ini.SetBoolValue(a_section, "bStanceInvertMovementHigh", stanceInvertMovement[3]);
 }
 
 void Settings::Load()
@@ -275,6 +324,13 @@ void Settings::Load()
 		frameGenCompatMode = iniFrameGenMode;
 	}
 	
+	// High Framerate Fix - rate limits offset application to ~143fps
+	highFramerateFix = ini.GetBoolValue("FrameGenCompat", "bHighFramerateFix", false);
+	
+	// Stances Integration
+	// Note: stancesInstalled is detected at runtime, not loaded from INI
+	enableStanceSupport = ini.GetBoolValue("Stances", "bEnableStanceSupport", true);
+	
 	// Store file modification time for hot reload
 	try {
 		lastModifiedTime = std::filesystem::last_write_time(path);
@@ -336,6 +392,9 @@ void Settings::Load()
 		ws.jumpImpulseY = 4.0f;
 		ws.jumpImpulseZ = 6.0f;
 		ws.jumpRotImpulse = 3.0f;
+		ws.fallImpulseY = 1.5f;
+		ws.fallImpulseZ = 2.0f;
+		ws.fallRotImpulse = 1.0f;
 		ws.jumpStiffness = 40.0f;
 		ws.jumpDamping = 3.0f;
 		ws.landImpulseY = 3.0f;
@@ -344,6 +403,15 @@ void Settings::Load()
 		ws.landStiffness = 120.0f;
 		ws.landDamping = 10.0f;
 		ws.airTimeImpulseScale = 1.5f;
+
+		// Stance settings
+		ws.enableStanceMultipliers = false;
+		for (int i = 0; i < 4; ++i) {
+			ws.stanceMultipliers[i] = 1.0f;
+			ws.stanceInvertCamera[i] = false;
+			ws.stanceInvertMovement[i] = false;
+		}
+
 		// Pivot
 		ws.pivotPoint = pivot;
 	};
@@ -417,7 +485,7 @@ void Settings::Load()
 		}
 	};
 	
-	// Check for the new 'bEnabled' field in each weapon section
+	// Check for new fields in each weapon section
 	const char* weaponSections[] = {
 		"Unarmed", "OneHandSword", "OneHandDagger", "OneHandAxe", "OneHandMace",
 		"TwoHandSword", "TwoHandAxe", "Bow", "Staff", "Crossbow", "Shield", "Spell",
@@ -425,6 +493,9 @@ void Settings::Load()
 	};
 	for (const char* section : weaponSections) {
 		checkNewField(section, "bEnabled");
+		// Stance invert options (new fields)
+		checkNewField(section, "bStanceInvertCameraNeutral");
+		checkNewField(section, "bStanceInvertMovementNeutral");
 	}
 	
 	// Load per-weapon settings from INI
@@ -692,6 +763,14 @@ void Settings::Save()
 	// Frame Generation Compatibility
 	ini.SetBoolValue("FrameGenCompat", "bEnabled", frameGenCompatMode,
 		"; Enable two-hook frame generation compatibility (applies offsets after animations)");
+	ini.SetBoolValue("FrameGenCompat", "bHighFramerateFix", highFramerateFix,
+		"; Fix ghosting at high framerates (140+) by limiting offset application rate to ~143fps");
+	
+	// Stances Integration
+	ini.SetBoolValue("Stances", "bEnableStanceSupport", enableStanceSupport,
+		"; Enable stance mod integration (Stances NG, Dynamic Weapon Movesets)\n"
+		"; When a stance mod is detected, stance multipliers in each weapon section will be applied\n"
+		"; fStanceMultNeutral/Low/Mid/High in each weapon section multiplies all inertia values for that stance");
 	
 	// Per-weapon settings
 	unarmed.Save(ini, "Unarmed");

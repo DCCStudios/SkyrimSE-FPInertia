@@ -87,6 +87,9 @@ void to_json(json& j, const WeaponInertiaSettings& s)
 		{"jumpImpulseY", s.jumpImpulseY},
 		{"jumpImpulseZ", s.jumpImpulseZ},
 		{"jumpRotImpulse", s.jumpRotImpulse},
+		{"fallImpulseY", s.fallImpulseY},
+		{"fallImpulseZ", s.fallImpulseZ},
+		{"fallRotImpulse", s.fallRotImpulse},
 		{"jumpStiffness", s.jumpStiffness},
 		{"jumpDamping", s.jumpDamping},
 		{"landImpulseY", s.landImpulseY},
@@ -94,7 +97,13 @@ void to_json(json& j, const WeaponInertiaSettings& s)
 		{"landRotImpulse", s.landRotImpulse},
 		{"landStiffness", s.landStiffness},
 		{"landDamping", s.landDamping},
-		{"airTimeImpulseScale", s.airTimeImpulseScale}
+		{"airTimeImpulseScale", s.airTimeImpulseScale},
+		
+		// Stance multipliers
+		{"enableStanceMultipliers", s.enableStanceMultipliers},
+		{"stanceMultipliers", s.stanceMultipliers},
+		{"stanceInvertCamera", s.stanceInvertCamera},
+		{"stanceInvertMovement", s.stanceInvertMovement}
 	};
 }
 
@@ -159,6 +168,9 @@ void from_json(const json& j, WeaponInertiaSettings& s)
 	if (j.contains("jumpImpulseY")) j.at("jumpImpulseY").get_to(s.jumpImpulseY);
 	if (j.contains("jumpImpulseZ")) j.at("jumpImpulseZ").get_to(s.jumpImpulseZ);
 	if (j.contains("jumpRotImpulse")) j.at("jumpRotImpulse").get_to(s.jumpRotImpulse);
+	if (j.contains("fallImpulseY")) j.at("fallImpulseY").get_to(s.fallImpulseY);
+	if (j.contains("fallImpulseZ")) j.at("fallImpulseZ").get_to(s.fallImpulseZ);
+	if (j.contains("fallRotImpulse")) j.at("fallRotImpulse").get_to(s.fallRotImpulse);
 	if (j.contains("jumpStiffness")) j.at("jumpStiffness").get_to(s.jumpStiffness);
 	if (j.contains("jumpDamping")) j.at("jumpDamping").get_to(s.jumpDamping);
 	if (j.contains("landImpulseY")) j.at("landImpulseY").get_to(s.landImpulseY);
@@ -167,6 +179,12 @@ void from_json(const json& j, WeaponInertiaSettings& s)
 	if (j.contains("landStiffness")) j.at("landStiffness").get_to(s.landStiffness);
 	if (j.contains("landDamping")) j.at("landDamping").get_to(s.landDamping);
 	if (j.contains("airTimeImpulseScale")) j.at("airTimeImpulseScale").get_to(s.airTimeImpulseScale);
+	
+	// Stance multipliers
+	if (j.contains("enableStanceMultipliers")) j.at("enableStanceMultipliers").get_to(s.enableStanceMultipliers);
+	if (j.contains("stanceMultipliers")) j.at("stanceMultipliers").get_to(s.stanceMultipliers);
+	if (j.contains("stanceInvertCamera")) j.at("stanceInvertCamera").get_to(s.stanceInvertCamera);
+	if (j.contains("stanceInvertMovement")) j.at("stanceInvertMovement").get_to(s.stanceInvertMovement);
 }
 
 const char* InertiaPresets::GetWeaponTypeName(WeaponType a_type)

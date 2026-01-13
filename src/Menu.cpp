@@ -230,6 +230,18 @@ namespace Menu
 				ImGui::EndPopup();
 			}
 		}
+		
+		// High Framerate Fix toggle
+		{
+			bool highFpsFix = settings->highFramerateFix;
+			if (ImGui::Checkbox("High Framerate Fix", &highFpsFix)) {
+				settings->highFramerateFix = highFpsFix;
+				State::hasUnsavedChanges = true;
+			}
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("Fixes ghosting at high framerates (140+ FPS) by rate-limiting\noffset application to ~143fps. Enable if you see ghosting\nwithout Frame Generation.");
+			}
+		}
 		ImGui::Spacing();
 		
 		ImGui::Text("FP Inertia v1.0.0");
@@ -1528,6 +1540,28 @@ namespace Menu
 					State::hasUnsavedChanges = true;
 				}
 				
+				ImGui::Spacing();
+				ImGui::Text("Fall (Ledge) Settings:");
+				ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "Impulse when falling off a ledge without jumping");
+				
+				if (SliderFloatWithTooltip("Fall Y Impulse##fall", &settings.fallImpulseY, 0.0f, 30.0f, "%.1f",
+					"Forward/back impulse when falling off ledge\nGentler than jump - just arms following momentum")) {
+					State::hasUnsavedChanges = true;
+				}
+				
+				if (SliderFloatWithTooltip("Fall Z Impulse##fall", &settings.fallImpulseZ, 0.0f, 30.0f, "%.1f",
+					"Vertical impulse when falling off ledge\nSlighter than jump - no push-off motion")) {
+					State::hasUnsavedChanges = true;
+				}
+				
+				if (SliderFloatWithTooltip("Fall Rotation##fall", &settings.fallRotImpulse, 0.0f, 30.0f, "%.1f deg",
+					"Rotation impulse when falling off ledge")) {
+					State::hasUnsavedChanges = true;
+				}
+				
+				ImGui::Spacing();
+				ImGui::Text("Airborne Settings:");
+				
 				if (SliderFloatWithTooltip("Airborne Stiffness##jump", &settings.jumpStiffness, 10.0f, 200.0f, "%.0f",
 					"Spring stiffness while in the air\nLow = floaty, retains motion longer")) {
 					State::hasUnsavedChanges = true;
@@ -1615,6 +1649,97 @@ namespace Menu
 			ImGui::TreePop();
 		}
 		
+		// Stance Multipliers Section (per-stance intensity scaling)
+		auto* globalSettings = Settings::GetSingleton();
+		if (ImGui::TreeNodeEx("Stances (Intensity Scaling)", 0)) {
+			ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "Per-stance intensity multipliers and invert overrides");
+			ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "Requires Stances NG or Dynamic Weapon Movesets");
+			
+			if (!globalSettings->stancesNGInstalled) {
+				ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "(No stance mod detected - settings will apply when installed)");
+			}
+			
+			ImGui::Spacing();
+			
+			// Neutral stance
+			ImGui::Text("Neutral (no stance):");
+			ImGui::PushItemWidth(120.0f);
+			if (SliderFloatWithTooltip("Mult##stanceNeutral", &settings.stanceMultipliers[0], 0.0f, 5.0f, "%.2f",
+				"Intensity multiplier when no stance is active\n0 = no inertia, 1 = normal, 2 = double")) {
+				State::hasUnsavedChanges = true;
+			}
+			ImGui::PopItemWidth();
+			ImGui::SameLine();
+			if (CheckboxWithTooltip("Inv Cam##stanceNeutralCam", &settings.stanceInvertCamera[0],
+				"Invert camera inertia when in Neutral stance\n(XORs with base invert setting)")) {
+				State::hasUnsavedChanges = true;
+			}
+			ImGui::SameLine();
+			if (CheckboxWithTooltip("Inv Mov##stanceNeutralMov", &settings.stanceInvertMovement[0],
+				"Invert movement inertia when in Neutral stance\n(XORs with base invert setting)")) {
+				State::hasUnsavedChanges = true;
+			}
+
+			// Low stance
+			ImGui::Text("Low Stance:");
+			ImGui::PushItemWidth(120.0f);
+			if (SliderFloatWithTooltip("Mult##stanceLow", &settings.stanceMultipliers[1], 0.0f, 5.0f, "%.2f",
+				"Intensity multiplier when in Low stance\n0 = no inertia, 1 = normal, 2 = double")) {
+				State::hasUnsavedChanges = true;
+			}
+			ImGui::PopItemWidth();
+			ImGui::SameLine();
+			if (CheckboxWithTooltip("Inv Cam##stanceLowCam", &settings.stanceInvertCamera[1],
+				"Invert camera inertia when in Low stance\n(XORs with base invert setting)")) {
+				State::hasUnsavedChanges = true;
+			}
+			ImGui::SameLine();
+			if (CheckboxWithTooltip("Inv Mov##stanceLowMov", &settings.stanceInvertMovement[1],
+				"Invert movement inertia when in Low stance\n(XORs with base invert setting)")) {
+				State::hasUnsavedChanges = true;
+			}
+
+			// Mid stance
+			ImGui::Text("Mid Stance:");
+			ImGui::PushItemWidth(120.0f);
+			if (SliderFloatWithTooltip("Mult##stanceMid", &settings.stanceMultipliers[2], 0.0f, 5.0f, "%.2f",
+				"Intensity multiplier when in Mid stance\n0 = no inertia, 1 = normal, 2 = double")) {
+				State::hasUnsavedChanges = true;
+			}
+			ImGui::PopItemWidth();
+			ImGui::SameLine();
+			if (CheckboxWithTooltip("Inv Cam##stanceMidCam", &settings.stanceInvertCamera[2],
+				"Invert camera inertia when in Mid stance\n(XORs with base invert setting)")) {
+				State::hasUnsavedChanges = true;
+			}
+			ImGui::SameLine();
+			if (CheckboxWithTooltip("Inv Mov##stanceMidMov", &settings.stanceInvertMovement[2],
+				"Invert movement inertia when in Mid stance\n(XORs with base invert setting)")) {
+				State::hasUnsavedChanges = true;
+			}
+
+			// High stance
+			ImGui::Text("High Stance:");
+			ImGui::PushItemWidth(120.0f);
+			if (SliderFloatWithTooltip("Mult##stanceHigh", &settings.stanceMultipliers[3], 0.0f, 5.0f, "%.2f",
+				"Intensity multiplier when in High stance\n0 = no inertia, 1 = normal, 2 = double")) {
+				State::hasUnsavedChanges = true;
+			}
+			ImGui::PopItemWidth();
+			ImGui::SameLine();
+			if (CheckboxWithTooltip("Inv Cam##stanceHighCam", &settings.stanceInvertCamera[3],
+				"Invert camera inertia when in High stance\n(XORs with base invert setting)")) {
+				State::hasUnsavedChanges = true;
+			}
+			ImGui::SameLine();
+			if (CheckboxWithTooltip("Inv Mov##stanceHighMov", &settings.stanceInvertMovement[3],
+				"Invert movement inertia when in High stance\n(XORs with base invert setting)")) {
+				State::hasUnsavedChanges = true;
+			}
+			
+			ImGui::TreePop();
+		}
+		
 		// Reset button for this weapon type
 		ImGui::Spacing();
 		if (ImGui::Button("Reset to Defaults")) {
@@ -1656,6 +1781,9 @@ namespace Menu
 			settings.jumpImpulseY = 4.0f;
 			settings.jumpImpulseZ = 6.0f;
 			settings.jumpRotImpulse = 3.0f;
+			settings.fallImpulseY = 1.5f;
+			settings.fallImpulseZ = 2.0f;
+			settings.fallRotImpulse = 1.0f;
 			settings.jumpStiffness = 40.0f;
 			settings.jumpDamping = 3.0f;
 			settings.landImpulseY = 3.0f;
@@ -1665,6 +1793,12 @@ namespace Menu
 			settings.landDamping = 10.0f;
 			settings.airTimeImpulseScale = 1.5f;
 			settings.pivotPoint = 0;
+			// Stance settings
+			for (int i = 0; i < 4; ++i) {
+				settings.stanceMultipliers[i] = 1.0f;
+				settings.stanceInvertCamera[i] = false;
+				settings.stanceInvertMovement[i] = false;
+			}
 			State::hasUnsavedChanges = true;
 		}
 		if (ImGui::IsItemHovered()) {

@@ -91,8 +91,10 @@ if(MSVC)
 		/EHsc
 		/W4
 		/WX-
+		/wd4099  # type name first seen using 'struct' now seen using 'class'
 		/wd4100  # unreferenced formal parameter
 		/wd4189  # local variable initialized but not referenced
+		/wd5054  # operator '|': deprecated between enumerations of different types
 	)
 
 	target_link_options(${PROJECT_NAME} PRIVATE

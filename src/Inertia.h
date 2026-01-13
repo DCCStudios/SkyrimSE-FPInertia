@@ -25,6 +25,16 @@ namespace Inertia
 		}
 	};
 
+	// Combat stance types (from Dynamic Weapon Movesets or Stances NG)
+	enum class Stance : int
+	{
+		Neutral = 0,
+		Low = 1,
+		Mid = 2,
+		High = 3,
+		COUNT = 4  // For array sizing
+	};
+
 	// Hand tracking for dual wielding
 	enum class Hand
 	{
@@ -51,6 +61,9 @@ namespace Inertia
 		
 		// Frame-gen compatible: Apply deferred offsets (called from UpdateFirstPerson hook)
 		void OnFirstPersonUpdate(RE::NiAVObject* a_firstPersonObject);
+		
+		// Called when a save game is loaded (initializes stance detection)
+		void OnSaveLoaded();
 
 	private:
 		InertiaManager() = default;
@@ -90,9 +103,13 @@ namespace Inertia
 		// Get clavicle node for a specific side (used for dual clavicle pivots 4 and 5)
 		RE::NiNode* GetClavicleNode(RE::NiNode* a_fpRoot, Hand a_hand);
 		
+		// Apply inertia to enchantment effects attached to weapons
+		
 		// Update spring physics
+		// Optional stance invert overrides: when true, XOR with base invert settings
 		void UpdateSpring(SpringState& a_state, const WeaponInertiaSettings& a_settings, 
-			const RE::NiPoint3& a_cameraVelocity, float a_delta, float a_multiplier);
+			const RE::NiPoint3& a_cameraVelocity, float a_delta, float a_multiplier,
+			bool a_stanceInvertCamera = false);
 		
 		// Apply offset to node (a_hand parameter used for pivot 5 side-specific compensation)
 		void ApplyOffset(RE::NiNode* a_node, const SpringState& a_state, 
@@ -206,6 +223,33 @@ namespace Inertia
 		
 		// Calculate local movement velocity (relative to camera facing)
 		RE::NiPoint3 CalculateLocalMovement(RE::PlayerCharacter* a_player, float a_delta);
+		
+		// === STANCE DETECTION ===
+		// Stances NG magic effects (detected at runtime after save load)
+		// FormIDs from StancesNG.esp: Bear=0x803 (High), Wolf=0x805 (Mid), Hawk=0x806 (Low)
+		RE::EffectSetting* stanceHighEffect{ nullptr };   // Bear Stance (0x803) = High
+		RE::EffectSetting* stanceMidEffect{ nullptr };    // Wolf Stance (0x805) = Mid
+		RE::EffectSetting* stanceLowEffect{ nullptr };    // Hawk Stance (0x806) = Low
+		
+		// Dynamic Weapon Movesets perks (detected at runtime after save load)
+		// FormIDs from "Stances - Dynamic Weapon Movesets SE.esp": High=0x42518, Mid=0x42519, Low=0x4251A
+		RE::BGSPerk* dwmHighPerk{ nullptr };   // High Stance (0x42518)
+		RE::BGSPerk* dwmMidPerk{ nullptr };    // Mid Stance (0x42519)
+		RE::BGSPerk* dwmLowPerk{ nullptr };    // Low Stance (0x4251A)
+		
+		bool stancesInitialized{ false };
+		bool saveLoaded{ false };  // Only initialize stances after a save is loaded
+		Stance currentStance{ Stance::Neutral };
+		Stance previousStance{ Stance::Neutral };
+		
+		// Initialize Stances NG / Dynamic Weapon Movesets integration (call after save load)
+		void InitStances();
+		
+		// Get current stance from stance mods (returns Neutral if no mod installed)
+		Stance GetCurrentStance() const;
+		
+		// Check if any stance mod is available
+		bool IsStancesAvailable() const;
 	};
 
 	// Install the update hook

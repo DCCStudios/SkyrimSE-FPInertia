@@ -22,7 +22,7 @@ namespace
 		*path /= fmt::format("{}.log"sv, Plugin::NAME);
 		auto sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(path->string(), true);
 
-		const auto level = spdlog::level::info;
+		const auto level = spdlog::level::trace;
 
 		auto log = std::make_shared<spdlog::logger>("global log"s, std::move(sink));
 		log->set_level(level);
@@ -44,6 +44,13 @@ void MessageHandler(SKSE::MessagingInterface::Message* a_msg)
 		InertiaPresets::GetSingleton()->Init();
 		Inertia::Install();
 		Menu::Register();
+		break;
+	case SKSE::MessagingInterface::kPostLoadGame:
+	case SKSE::MessagingInterface::kNewGame:
+		// Initialize stance detection after save/new game is loaded
+		// This is when we can reliably look up forms from stance mods
+		logger::info("Game loaded/started - initializing stance detection");
+		Inertia::InertiaManager::GetSingleton()->OnSaveLoaded();
 		break;
 	}
 }
@@ -98,4 +105,8 @@ extern "C" DLLEXPORT bool SKSEAPI SKSEPlugin_Load(const SKSE::LoadInterface* a_s
 	logger::info("Plugin loaded successfully");
 	return true;
 }
+
+
+
+
 

@@ -81,6 +81,9 @@ struct WeaponInertiaSettings
 	float jumpImpulseY{ 4.0f };              // Y impulse when jumping
 	float jumpImpulseZ{ 6.0f };              // Z impulse when jumping
 	float jumpRotImpulse{ 3.0f };            // Rotation impulse when jumping (degrees)
+	float fallImpulseY{ 4.0f };              // Y impulse when falling (ledge)
+	float fallImpulseZ{ 6.0f };              // Z impulse when falling (ledge)
+	float fallRotImpulse{ 3.0f };            // Rotation impulse when falling (degrees)
 	float jumpStiffness{ 40.0f };            // Spring stiffness while airborne
 	float jumpDamping{ 3.0f };               // Damping while airborne
 	float landImpulseY{ 3.0f };              // Y impulse when landing
@@ -91,8 +94,14 @@ struct WeaponInertiaSettings
 	float airTimeImpulseScale{ 1.5f };       // Scale landing impulse by air time
 	
 	// === PIVOT POINT ===
-	int pivotPoint{ 0 };  // 0=Chest, 1=RightHand, 2=LeftHand, 3=Weapon
-	
+	int pivotPoint{ 0 };  // 0=Chest, 1=RightHand, 2=LeftHand, 3=Weapon, 4=BothClavicles, 5=BothClaviclesOffset
+
+	// === STANCE MULTIPLIERS ===
+	bool enableStanceMultipliers{ false };    // Enable stance-specific intensity multipliers
+	float stanceMultipliers[4]{ 1.0f, 1.0f, 1.0f, 1.0f };  // Neutral, Low, Mid, High
+	bool stanceInvertCamera[4]{ false, false, false, false };  // Invert camera per stance
+	bool stanceInvertMovement[4]{ false, false, false, false }; // Invert movement per stance
+
 	void Load(CSimpleIniA& a_ini, const char* a_section);
 	void Save(CSimpleIniA& a_ini, const char* a_section) const;
 };
@@ -154,7 +163,12 @@ public:
 	// Frame Generation compatibility
 	bool communityShadersDetected{ false };
 	bool frameGenCompatMode{ false };
-	
+	bool highFramerateFix{ true };
+
+	// Stance detection
+	bool stancesNGInstalled{ false };     // Auto-detected: Stances NG or Dynamic Weapon Movesets installed
+	bool enableStanceSupport{ true };     // Enable stance detection and multipliers
+
 	// Debug settings
 	bool debugLogging{ false };
 	bool debugOnScreen{ false };

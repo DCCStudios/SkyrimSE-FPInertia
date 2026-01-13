@@ -3,6 +3,32 @@
 
 namespace Inertia
 {
+	// Forward declaration for WeaponEnchantmentController (from EnchantmentArtExtender)
+	class WeaponEnchantmentController : public RE::ReferenceEffectController
+	{
+	public:
+		RE::ActorMagicCaster* magicCaster;   // 08
+		RE::Actor* target;                   // 10
+		RE::TESEffectShader* effectShader;  // 18
+		RE::BGSArtObject* artObject;        // 20
+		RE::NiPointer<RE::NiAVObject> attachRoot; // 28
+		RE::TESObjectWEAP* weapon;          // 30
+		bool firstPerson;                   // 38
+	};
+
+	static_assert(sizeof(WeaponEnchantmentController) == 0x40);
+
+	// Helper function to get stance name
+	const char* GetStanceName(Stance a_stance)
+	{
+		switch (a_stance) {
+		case Stance::Neutral: return "Neutral";
+		case Stance::Low:     return "Low";
+		case Stance::Mid:     return "Mid";
+		case Stance::High:    return "High";
+		default:              return "Unknown";
+		}
+	}
 	namespace
 	{
 		// Constants
@@ -607,19 +633,23 @@ namespace Inertia
 
 	// Update camera-based spring (responds to camera rotation)
 	void InertiaManager::UpdateSpring(SpringState& a_state, const WeaponInertiaSettings& a_settings,
-		const RE::NiPoint3& a_cameraVelocity, float a_delta, float a_multiplier)
+		const RE::NiPoint3& a_cameraVelocity, float a_delta, float a_multiplier,
+		bool a_stanceInvertCamera)
 	{
 		auto* settings = Settings::GetSingleton();
 		float intensity = settings->globalIntensity * a_multiplier;
-		
+
 		if (intensity <= 0.0f) {
 			a_state.Reset();
 			return;
 		}
 		
 		// Separate invert factors for pitch (up/down) and yaw (left/right)
-		float invertPitch = a_settings.invertCameraPitch ? -1.0f : 1.0f;
-		float invertYaw = a_settings.invertCameraYaw ? -1.0f : 1.0f;
+		// XOR with stance-specific override: stance invert flips the base setting
+		bool effectiveInvertPitch = a_settings.invertCameraPitch ^ a_stanceInvertCamera;
+		bool effectiveInvertYaw = a_settings.invertCameraYaw ^ a_stanceInvertCamera;
+		float invertPitch = effectiveInvertPitch ? -1.0f : 1.0f;
+		float invertYaw = effectiveInvertYaw ? -1.0f : 1.0f;
 		
 		// Spring-damper system for CAMERA inertia only
 		float k = a_settings.stiffness;
@@ -714,9 +744,11 @@ namespace Inertia
 	// Update movement-based spring (responds to player strafing and forward/back movement)
 	// Uses TARGET-BASED spring: spring moves towards target position, not just returning to 0
 	// Uses PER-WEAPON settings for spring parameters
+	// Optional stance invert override: when true, XOR with base invert settings
 	void UpdateMovementSpring(SpringState& a_state, Settings* settings, 
 		const WeaponInertiaSettings& a_weaponSettings,
-		const RE::NiPoint3& a_localMovement, float a_delta, float a_intensity)
+		const RE::NiPoint3& a_localMovement, float a_delta, float a_intensity,
+		bool a_stanceInvertMovement = false)
 	{
 		// Check per-weapon enable AND global enable
 		if (!settings->movementInertiaEnabled || !a_weaponSettings.movementInertiaEnabled || a_intensity <= 0.0f) {
@@ -735,8 +767,11 @@ namespace Inertia
 		float m = 1.0f;
 		
 		// Separate invert factors for lateral (left/right) and forward/back movement
-		float invertLateral = a_weaponSettings.invertMovementLateral ? -1.0f : 1.0f;
-		float invertForwardBack = a_weaponSettings.invertMovementForwardBack ? -1.0f : 1.0f;
+		// XOR with stance-specific override: stance invert flips the base setting
+		bool effectiveInvertLateral = a_weaponSettings.invertMovementLateral ^ a_stanceInvertMovement;
+		bool effectiveInvertForwardBack = a_weaponSettings.invertMovementForwardBack ^ a_stanceInvertMovement;
+		float invertLateral = effectiveInvertLateral ? -1.0f : 1.0f;
+		float invertForwardBack = effectiveInvertForwardBack ? -1.0f : 1.0f;
 		
 		// Calculate TARGET position based on movement
 		RE::NiPoint3 targetPos = { 0.0f, 0.0f, 0.0f };
@@ -1028,8 +1063,13 @@ namespace Inertia
 				a_state.positionVelocity.y += a_weaponSettings.jumpImpulseY * 15.0f;
 				a_state.positionVelocity.z -= a_weaponSettings.jumpImpulseZ * 20.0f;
 				a_state.rotationVelocity.x += a_weaponSettings.jumpRotImpulse * DEG_TO_RAD_LOCAL * 8.0f;
+			} else {
+				// Player fell off a ledge - apply gentler fall impulse
+				// Slight downward/forward motion as arms follow momentum
+				a_state.positionVelocity.y += a_weaponSettings.fallImpulseY * 15.0f;
+				a_state.positionVelocity.z -= a_weaponSettings.fallImpulseZ * 20.0f;
+				a_state.rotationVelocity.x += a_weaponSettings.fallRotImpulse * DEG_TO_RAD_LOCAL * 8.0f;
 			}
-			// If just falling (no jump), no impulse - we'll apply it on landing
 		}
 		else if (a_landingDetected) {
 			// Just landed (detected via SBF_ReadyStart or state transition with cooldown)
@@ -1506,9 +1546,11 @@ namespace Inertia
 		// Track air time for landing impulse scaling
 		if (currentlyInAir && !wasInAir) {
 			// Just left ground - reset air time
-			// We can't easily distinguish jump vs fall, so we apply jump impulse always
-			// but scale landing based on air time (short air time = small landing)
-			didJump = true;  // Treat all takeoffs as potential jumps
+			// Detect if player jumped vs fell by checking behavior graph "bInJumpState"
+			// This is set by the game when the player actually presses jump
+			bool inJumpState = false;
+			player->GetGraphVariableBool("bInJumpState", inJumpState);
+			didJump = inJumpState;
 			airTime = 0.0f;
 		}
 		
@@ -1552,18 +1594,40 @@ namespace Inertia
 			cameraAirBlend = std::max(cameraAirBlend - airBlendDelta, cameraAirTarget);
 		}
 		
+		// *** DETECT CURRENT STANCE ***
+		// Get current stance from stance mods (Stances NG, Dynamic Weapon Movesets)
+		// This affects the global intensity multiplier for all inertia
+		previousStance = currentStance;
+		currentStance = GetCurrentStance();
+		
+		// Get stance multiplier from per-weapon settings
+		float stanceMultiplier = primarySettings.stanceMultipliers[static_cast<size_t>(currentStance)];
+
+		// Get stance-specific invert overrides (when true, XOR with base invert settings)
+		bool stanceInvertCamera = primarySettings.stanceInvertCamera[static_cast<size_t>(currentStance)];
+		bool stanceInvertMovement = primarySettings.stanceInvertMovement[static_cast<size_t>(currentStance)];
+		
+		// Log stance changes (debug only)
+		if (settings->debugLogging && currentStance != previousStance) {
+			logger::info("[FPInertia] Stance changed: {} -> {} (mult: {:.2f}, invertCam: {}, invertMov: {})",
+				GetStanceName(previousStance), GetStanceName(currentStance), stanceMultiplier,
+				stanceInvertCamera ? "yes" : "no", stanceInvertMovement ? "yes" : "no");
+		}
+		
 		// *** UPDATE CAMERA SPRING ***
 		// Responds to camera rotation (looking around) - uses per-weapon settings
 		// Multiply intensity by equipBlendFactor so springs decay when weapon is sheathed
+		// Also apply stance multiplier for per-stance intensity adjustment
 		// This prevents built-up spring state from suddenly appearing when drawing a weapon
-		float cameraIntensity = actionBlendFactor * equipBlendFactor;
-		UpdateSpring(cameraSpring, primarySettings, smoothedCameraVelocity, a_delta, cameraIntensity);
+		float cameraIntensity = actionBlendFactor * equipBlendFactor * stanceMultiplier;
+		UpdateSpring(cameraSpring, primarySettings, smoothedCameraVelocity, a_delta, cameraIntensity, stanceInvertCamera);
 		
 		// *** UPDATE MOVEMENT SPRING (SEPARATE) ***
 		// Responds to player strafing - uses per-weapon movement spring settings
 		// Also uses equipBlendFactor to decay when weapon is sheathed
-		float movementIntensity = actionBlendFactor * equipBlendFactor;
-		UpdateMovementSpring(movementSpring, settings, primarySettings, smoothedLocalMovement, a_delta, movementIntensity);
+		// Also apply stance multiplier for per-stance intensity adjustment
+		float movementIntensity = actionBlendFactor * equipBlendFactor * stanceMultiplier;
+		UpdateMovementSpring(movementSpring, settings, primarySettings, smoothedLocalMovement, a_delta, movementIntensity, stanceInvertMovement);
 		
 		// *** UPDATE LEFT HAND SPRINGS (for dual clavicle pivot modes) ***
 		// Only use clavicle pivots (4 or 5) if we're actually in dual wield mode
@@ -1598,8 +1662,8 @@ namespace Inertia
 		if (useDualClaviclePivot) {
 			// Update left hand springs independently
 			// They use the same input but maintain separate state for natural asymmetry
-			UpdateSpring(cameraSpringLeft, primarySettings, smoothedCameraVelocity, a_delta, cameraIntensity);
-			UpdateMovementSpring(movementSpringLeft, settings, primarySettings, smoothedLocalMovement, a_delta, movementIntensity);
+			UpdateSpring(cameraSpringLeft, primarySettings, smoothedCameraVelocity, a_delta, cameraIntensity, stanceInvertCamera);
+			UpdateMovementSpring(movementSpringLeft, settings, primarySettings, smoothedLocalMovement, a_delta, movementIntensity, stanceInvertMovement);
 		}
 		
 		// Log spring intensities and output periodically while blending (debug only)
@@ -1776,6 +1840,8 @@ namespace Inertia
 		const auto& combinedState = deferredOffsets.combinedState;
 		const auto& combinedStateLeft = deferredOffsets.combinedStateLeft;
 		const auto& primarySettings = deferredOffsets.settings;
+
+		auto* settings = Settings::GetSingleton();
 		
 		// Check if offsets are significant enough to apply
 		// Skip entirely if offsets are negligible - this preserves particle effects at idle
@@ -1797,21 +1863,57 @@ namespace Inertia
 			return;
 		}
 		
+		// Apply inertia to spine/clavicle local transforms only
+		// The engine's Update() will handle propagation (called after this in the hook)
+		// This ensures correct motion vectors since we modify BEFORE the engine's Update()
+
+		if (deferredOffsets.useDualClaviclePivot) {
+			// Dual clavicle pivot (4 or 5): Apply to both clavicle nodes independently
+			RE::NiNode* rightClavicleNode = GetClavicleNode(fpNode, Hand::kRight);
+			RE::NiNode* leftClavicleNode = GetClavicleNode(fpNode, Hand::kLeft);
+
+			if (rightClavicleNode) {
+				ApplyOffset(rightClavicleNode, combinedState, primarySettings, Hand::kRight);
+				lastTargetNode = rightClavicleNode;
+			}
+
+			if (leftClavicleNode) {
+				ApplyOffset(leftClavicleNode, combinedStateLeft, primarySettings, Hand::kLeft);
+			}
+		} else {
+			// Standard pivot: Apply to spine node (or other single node)
+			RE::NiNode* targetNode = GetPivotNode(fpNode, player);
+
+			if (!targetNode) {
+				deferredOffsets.hasOffsets = false;
+				return;
+			}
+
+			lastTargetNode = targetNode;
+			logger::info("[FPInertia] Applying skeleton inertia - Node: '{}', Position: ({:.3f}, {:.3f}, {:.3f}), Rotation: ({:.3f}, {:.3f}, {:.3f})",
+				targetNode->name.c_str(),
+				combinedState.positionOffset.x, combinedState.positionOffset.y, combinedState.positionOffset.z,
+				combinedState.rotationOffset.x, combinedState.rotationOffset.y, combinedState.rotationOffset.z);
+			ApplyOffset(targetNode, combinedState, primarySettings);
+		}
+		
+		// Selective transform propagation per FP Inertia reference implementation:
+		// - Skip ONLY: MagicEffectsNode (exact match), Particle, -Emitter nodes
+		// - Do NOT skip NPC R MagicNode [RMag] - it's a skeleton bone for crossbow bolts
+		// - Update all skeleton bones, equipment, and geometry children
+		// - Use NiAVObject* not NiNode* to include geometry objects (weapons, Arrow:0, etc.)
 		RE::NiUpdateData updateData{};
 		
-		// Lambda to manually propagate world transforms through skeleton and equipment nodes
-		// This avoids calling Update() on magic/particle nodes which breaks spell effects
-		std::function<void(RE::NiAVObject*)> propagateTransforms = [&](RE::NiAVObject* obj) {
+		std::function<void(RE::NiAVObject*)> selectivePropagation = [&](RE::NiAVObject* obj) {
 			if (!obj) return;
 			
-			// Update this object's world transform from its local and parent
+			// Update this object's world transform
 			obj->UpdateWorldData(&updateData);
 			
-			// If this is a node with children, recurse
+			// Recurse into children if this is a node
 			auto* node = obj->AsNode();
-			if (!node) return;  // Geometry nodes don't have children
+			if (!node) return;
 			
-			// Recurse into children, but skip magic/particle effect nodes
 			auto& children = node->GetChildren();
 			for (std::uint16_t i = 0; i < children.capacity(); ++i) {
 				auto& child = children[i];
@@ -1819,61 +1921,49 @@ namespace Inertia
 				
 				std::string_view name = child->name.c_str();
 				
-				// Skip ONLY actual effect containers and particle nodes - NOT skeleton bones
-				// MagicEffectsNode is the actual spell effect container (under Spine)
-				// "NPC R MagicNode [RMag]" etc are just bones/attachment points - DO NOT skip these!
-				// Particle nodes are actual particle systems
-				bool isEffectContainer = (name == "MagicEffectsNode") ||               // The actual effects container
-				                          (name.find("Particle") != std::string_view::npos) ||  // Particle systems
-				                          (name.find("-Emitter") != std::string_view::npos);    // Particle emitters
+				// Skip ONLY these problematic effect containers:
+				// - MagicEffectsNode (exact match) - spell effects container
+				// - Nodes containing "Particle" - particle systems
+				// - Nodes ending in "-Emitter" - particle emitters
+				bool shouldSkip = (name == "MagicEffectsNode") ||
+				                  (name.find("Particle") != std::string_view::npos) ||
+				                  (name.length() > 8 && name.substr(name.length() - 8) == "-Emitter");
 				
-				if (isEffectContainer) {
-					// Skip effect containers entirely - let game handle them
+				if (shouldSkip) {
+					// Skip this node - let game handle it to preserve effects
 					continue;
 				}
 				
-				// Update all other objects (bones, weapons, shields, geometry, etc.)
-				propagateTransforms(child.get());
+				// Update all other nodes:
+				// - Skeleton bones (NPC *, CME *)
+				// - Equipment (WEAPON, SHIELD, AnimObject*)
+				// - NPC R MagicNode [RMag] - skeleton attachment for crossbow bolts
+				// - Geometry children (Arrow:0, weapon meshes, etc.)
+				selectivePropagation(child.get());
 			}
 		};
 		
+		// Apply selective propagation from the target node
 		if (deferredOffsets.useDualClaviclePivot) {
-			// Dual clavicle pivot (4 or 5): Apply to both clavicle nodes independently
 			RE::NiNode* rightClavicleNode = GetClavicleNode(fpNode, Hand::kRight);
 			RE::NiNode* leftClavicleNode = GetClavicleNode(fpNode, Hand::kLeft);
-			
-			if (rightClavicleNode) {
-				ApplyOffset(rightClavicleNode, combinedState, primarySettings, Hand::kRight);
-				lastTargetNode = rightClavicleNode;
-				// Propagate transforms, skip magic/particle nodes
-				propagateTransforms(rightClavicleNode);
-			}
-			
-			if (leftClavicleNode) {
-				ApplyOffset(leftClavicleNode, combinedStateLeft, primarySettings, Hand::kLeft);
-				propagateTransforms(leftClavicleNode);
-			}
-		} else {
-			// Standard pivot: Apply to spine node (or other single node)
-			RE::NiNode* targetNode = GetPivotNode(fpNode, player);
-			
-			if (!targetNode) {
-				deferredOffsets.hasOffsets = false;
-				return;
-			}
-			
-			lastTargetNode = targetNode;
-			ApplyOffset(targetNode, combinedState, primarySettings);
-			// Propagate transforms, skip magic/particle nodes
-			propagateTransforms(targetNode);
+			if (rightClavicleNode) selectivePropagation(rightClavicleNode);
+			if (leftClavicleNode) selectivePropagation(leftClavicleNode);
+		} else if (lastTargetNode) {
+			selectivePropagation(lastTargetNode);
 		}
-		
+
+		// Log the final skeleton inertia values for reference
+		logger::info("[FPInertia] FINAL: Skeleton inertia applied - Position: ({:.3f}, {:.3f}, {:.3f}), Rotation: ({:.3f}, {:.3f}, {:.3f})",
+			combinedState.positionOffset.x, combinedState.positionOffset.y, combinedState.positionOffset.z,
+			combinedState.rotationOffset.x, combinedState.rotationOffset.y, combinedState.rotationOffset.z);
+
 		// Log first successful update
-		static bool loggedFirstUpdate = false;
+	static bool loggedFirstUpdate = false;
 		if (!loggedFirstUpdate && lastTargetNode) {
-			const char* nodeType = deferredOffsets.useDualClaviclePivot ? 
+			const char* nodeType = deferredOffsets.useDualClaviclePivot ?
 				(primarySettings.pivotPoint == 5 ? "BothClaviclesOffset" : "BothClavicles") : "Spine";
-			logger::info("[FPInertia] First FP update hook application! Target: {} ({})", 
+			logger::info("[FPInertia] First FP update hook application! Target: {} ({})",
 				nodeType, lastTargetNode->name.c_str());
 			loggedFirstUpdate = true;
 		}
@@ -1992,19 +2082,7 @@ namespace Inertia
 		jumpSpringLeft.Reset();
 		isDualWieldMode = false;
 		currentDualWieldType = WeaponType::Unarmed;
-		
-		// Reset master enable tracking
-		wasInertiaDisabled = false;
-		
-		// Reset cached values (will be refreshed on first update)
-		cachedWeaponFormID = 0;
-		cachedWeaponSettings = nullptr;
-		cachedSettingsVersion = 0;
-		cachedSpineNode = nullptr;  // Will be found on first update
-		
-		// Reset deferred offsets
-		deferredOffsets.hasOffsets = false;
-		
+
 		auto* settings = Settings::GetSingleton();
 		logger::info("[FPInertia] Entered first person - inertia system active");
 		if (settings->debugLogging) {
@@ -2070,6 +2148,218 @@ namespace Inertia
 		
 		logger::info("[FPInertia] Exited first person - inertia system deactivated");
 	}
+
+	// === STANCE DETECTION IMPLEMENTATION ===
+	
+	void InertiaManager::InitStances()
+	{
+		auto* settings = Settings::GetSingleton();
+		if (!settings->enableStanceSupport) {
+			stancesInitialized = true;
+			return;
+		}
+		
+		// Only initialize after a save has been loaded
+		if (!saveLoaded) {
+			logger::debug("[FPInertia] Stances init deferred - waiting for save load");
+			return;
+		}
+		
+		// If already initialized and any stance forms found, don't re-init
+		bool hasStancesNG = stanceHighEffect || stanceMidEffect || stanceLowEffect;
+		bool hasDWM = dwmHighPerk || dwmMidPerk || dwmLowPerk;
+		if (stancesInitialized && (hasStancesNG || hasDWM)) {
+			return;
+		}
+		
+		auto* dataHandler = RE::TESDataHandler::GetSingleton();
+		if (!dataHandler) {
+			logger::error("[FPInertia] TESDataHandler not available for stance mod lookup");
+			return;
+		}
+		
+		// ========================
+		// Stances NG detection (magic effects)
+		// ========================
+		// According to mod documentation:
+		// - Bear Stance (High): FormID 0x803
+		// - Wolf Stance (Mid): FormID 0x805  
+		// - Hawk Stance (Low): FormID 0x806
+		
+		constexpr RE::FormID kBearStanceFormID = 0x803;  // High
+		constexpr RE::FormID kWolfStanceFormID = 0x805;  // Mid
+		constexpr RE::FormID kHawkStanceFormID = 0x806;  // Low
+		constexpr const char* kStancesNGPlugin = "StancesNG.esp";
+		
+		// Look up magic effects by FormID
+		auto* highForm = dataHandler->LookupForm(kBearStanceFormID, kStancesNGPlugin);
+		auto* midForm = dataHandler->LookupForm(kWolfStanceFormID, kStancesNGPlugin);
+		auto* lowForm = dataHandler->LookupForm(kHawkStanceFormID, kStancesNGPlugin);
+		
+		// Cast to EffectSetting (magic effect)
+		if (highForm) {
+			stanceHighEffect = highForm->As<RE::EffectSetting>();
+		}
+		if (midForm) {
+			stanceMidEffect = midForm->As<RE::EffectSetting>();
+		}
+		if (lowForm) {
+			stanceLowEffect = lowForm->As<RE::EffectSetting>();
+		}
+		
+		// ========================
+		// Dynamic Weapon Movesets detection (perks)
+		// ========================
+		// FormIDs from "Stances - Dynamic Weapon Movesets SE.esp":
+		// - High Stance: 0x42518
+		// - Mid Stance: 0x42519
+		// - Low Stance: 0x4251A
+		
+		constexpr RE::FormID kDWMHighPerkFormID = 0x42518;
+		constexpr RE::FormID kDWMMidPerkFormID = 0x42519;
+		constexpr RE::FormID kDWMLowPerkFormID = 0x4251A;
+		constexpr const char* kDWMPlugin = "Stances - Dynamic Weapon Movesets SE.esp";
+		
+		auto* dwmHighForm = dataHandler->LookupForm(kDWMHighPerkFormID, kDWMPlugin);
+		auto* dwmMidForm = dataHandler->LookupForm(kDWMMidPerkFormID, kDWMPlugin);
+		auto* dwmLowForm = dataHandler->LookupForm(kDWMLowPerkFormID, kDWMPlugin);
+		
+		// Cast to BGSPerk
+		if (dwmHighForm) {
+			dwmHighPerk = dwmHighForm->As<RE::BGSPerk>();
+		}
+		if (dwmMidForm) {
+			dwmMidPerk = dwmMidForm->As<RE::BGSPerk>();
+		}
+		if (dwmLowForm) {
+			dwmLowPerk = dwmLowForm->As<RE::BGSPerk>();
+		}
+		
+		stancesInitialized = true;
+		
+		// Log Stances NG results
+		logger::info("[FPInertia] Stances NG magic effect detection (from {}):", kStancesNGPlugin);
+		logger::info("[FPInertia]   Bear/High (0x{:03X}): {} (FormID: 0x{:08X})", 
+			kBearStanceFormID,
+			stanceHighEffect ? "Found" : "Not found",
+			stanceHighEffect ? stanceHighEffect->GetFormID() : 0);
+		logger::info("[FPInertia]   Wolf/Mid (0x{:03X}): {} (FormID: 0x{:08X})", 
+			kWolfStanceFormID,
+			stanceMidEffect ? "Found" : "Not found",
+			stanceMidEffect ? stanceMidEffect->GetFormID() : 0);
+		logger::info("[FPInertia]   Hawk/Low (0x{:03X}): {} (FormID: 0x{:08X})", 
+			kHawkStanceFormID,
+			stanceLowEffect ? "Found" : "Not found",
+			stanceLowEffect ? stanceLowEffect->GetFormID() : 0);
+		
+		// Log Dynamic Weapon Movesets results
+		logger::info("[FPInertia] Dynamic Weapon Movesets perk detection (from {}):", kDWMPlugin);
+		logger::info("[FPInertia]   High (0x{:05X}): {} (FormID: 0x{:08X})", 
+			kDWMHighPerkFormID,
+			dwmHighPerk ? "Found" : "Not found",
+			dwmHighPerk ? dwmHighPerk->GetFormID() : 0);
+		logger::info("[FPInertia]   Mid (0x{:05X}): {} (FormID: 0x{:08X})", 
+			kDWMMidPerkFormID,
+			dwmMidPerk ? "Found" : "Not found",
+			dwmMidPerk ? dwmMidPerk->GetFormID() : 0);
+		logger::info("[FPInertia]   Low (0x{:05X}): {} (FormID: 0x{:08X})", 
+			kDWMLowPerkFormID,
+			dwmLowPerk ? "Found" : "Not found",
+			dwmLowPerk ? dwmLowPerk->GetFormID() : 0);
+		
+		bool foundStancesNG = stanceHighEffect || stanceMidEffect || stanceLowEffect;
+		bool foundDWM = dwmHighPerk || dwmMidPerk || dwmLowPerk;
+		
+		// Update settings to reflect detection
+		settings->stancesNGInstalled = foundStancesNG || foundDWM;
+		
+		if (!foundStancesNG && !foundDWM) {
+			logger::info("[FPInertia] No stance mods detected - stance multipliers will not be applied");
+		} else {
+			if (foundStancesNG) {
+				logger::info("[FPInertia] Stances NG stance detection active");
+			}
+			if (foundDWM) {
+				logger::info("[FPInertia] Dynamic Weapon Movesets stance detection active");
+			}
+		}
+	}
+	
+	bool InertiaManager::IsStancesAvailable() const
+	{
+		auto* settings = Settings::GetSingleton();
+		return settings->stancesNGInstalled && settings->enableStanceSupport;
+	}
+	
+	Stance InertiaManager::GetCurrentStance() const
+	{
+		auto* settings = Settings::GetSingleton();
+		if (!settings->enableStanceSupport) {
+			return Stance::Neutral;
+		}
+		
+		auto* player = RE::PlayerCharacter::GetSingleton();
+		if (!player) {
+			return Stance::Neutral;
+		}
+		
+		// Re-try initialization if no stance forms were found (save may not have been loaded)
+		bool hasStancesNG = stanceHighEffect || stanceMidEffect || stanceLowEffect;
+		bool hasDWM = dwmHighPerk || dwmMidPerk || dwmLowPerk;
+		if (!hasStancesNG && !hasDWM) {
+			const_cast<InertiaManager*>(this)->InitStances();
+		}
+		
+		// ========================
+		// Check Stances NG magic effects (primary method)
+		// ========================
+		auto* magicTarget = player->AsMagicTarget();
+		if (magicTarget) {
+			if (stanceHighEffect && magicTarget->HasMagicEffect(stanceHighEffect)) {
+				return Stance::High;
+			}
+			if (stanceMidEffect && magicTarget->HasMagicEffect(stanceMidEffect)) {
+				return Stance::Mid;
+			}
+			if (stanceLowEffect && magicTarget->HasMagicEffect(stanceLowEffect)) {
+				return Stance::Low;
+			}
+		}
+		
+		// ========================
+		// Check Dynamic Weapon Movesets perks
+		// ========================
+		if (dwmHighPerk && player->HasPerk(dwmHighPerk)) {
+			return Stance::High;
+		}
+		if (dwmMidPerk && player->HasPerk(dwmMidPerk)) {
+			return Stance::Mid;
+		}
+		if (dwmLowPerk && player->HasPerk(dwmLowPerk)) {
+			return Stance::Low;
+		}
+		
+		return Stance::Neutral;
+	}
+	
+	void InertiaManager::OnSaveLoaded()
+	{
+		logger::info("[FPInertia] Save loaded - initializing stance detection");
+		saveLoaded = true;
+		
+		// Reset stance detection state for re-initialization
+		stanceHighEffect = nullptr;
+		stanceMidEffect = nullptr;
+		stanceLowEffect = nullptr;
+		dwmHighPerk = nullptr;
+		dwmMidPerk = nullptr;
+		dwmLowPerk = nullptr;
+		stancesInitialized = false;
+		
+		InitStances();
+	}
+
+
 
 	// Main update hook - calculates spring physics and stores deferred offsets
 	namespace Hook
@@ -2151,12 +2441,18 @@ namespace Inertia
 		private:
 			static void OnFirstPersonUpdate(RE::NiAVObject* a_firstPersonObject, RE::NiUpdateData* a_updateData)
 			{
-				// Call original first - runs the game's animation update
-				_originalFunc(a_firstPersonObject, a_updateData);
+				// CORRECT HOOK ORDER (per ImprovedCameraSE-NG):
+				// 1. Apply our local transform modifications BEFORE calling original
+				// 2. Call original - engine's Update() will propagate with our offsets
+				// 3. No need to call Update() ourselves - engine handles everything including previousWorld
 				
-				// Now apply our deferred offsets AFTER animations are done
-				// This is why the modifications persist and don't get overwritten
+				// Apply our deferred offsets BEFORE the engine's update
+				// This ensures the engine's Update() propagates our modified local transforms
+				// and correctly handles previousWorld for motion vectors
 				InertiaManager::GetSingleton()->OnFirstPersonUpdate(a_firstPersonObject);
+				
+				// Now call the original - engine propagates transforms with our modifications
+				_originalFunc(a_firstPersonObject, a_updateData);
 			}
 			
 			static inline REL::Relocation<decltype(OnFirstPersonUpdate)> _originalFunc;
