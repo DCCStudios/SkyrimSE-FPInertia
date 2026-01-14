@@ -1897,61 +1897,9 @@ namespace Inertia
 			ApplyOffset(targetNode, combinedState, primarySettings);
 		}
 		
-		// Selective transform propagation per FP Inertia reference implementation:
-		// - Skip ONLY: MagicEffectsNode (exact match), Particle, -Emitter nodes
-		// - Do NOT skip NPC R MagicNode [RMag] - it's a skeleton bone for crossbow bolts
-		// - Update all skeleton bones, equipment, and geometry children
-		// - Use NiAVObject* not NiNode* to include geometry objects (weapons, Arrow:0, etc.)
-		RE::NiUpdateData updateData{};
-		
-		std::function<void(RE::NiAVObject*)> selectivePropagation = [&](RE::NiAVObject* obj) {
-			if (!obj) return;
-			
-			// Update this object's world transform
-			obj->UpdateWorldData(&updateData);
-			
-			// Recurse into children if this is a node
-			auto* node = obj->AsNode();
-			if (!node) return;
-			
-			auto& children = node->GetChildren();
-			for (std::uint16_t i = 0; i < children.capacity(); ++i) {
-				auto& child = children[i];
-				if (!child) continue;
-				
-				std::string_view name = child->name.c_str();
-				
-				// Skip ONLY these problematic effect containers:
-				// - MagicEffectsNode (exact match) - spell effects container
-				// - Nodes containing "Particle" - particle systems
-				// - Nodes ending in "-Emitter" - particle emitters
-				bool shouldSkip = (name == "MagicEffectsNode") ||
-				                  (name.find("Particle") != std::string_view::npos) ||
-				                  (name.length() > 8 && name.substr(name.length() - 8) == "-Emitter");
-				
-				if (shouldSkip) {
-					// Skip this node - let game handle it to preserve effects
-					continue;
-				}
-				
-				// Update all other nodes:
-				// - Skeleton bones (NPC *, CME *)
-				// - Equipment (WEAPON, SHIELD, AnimObject*)
-				// - NPC R MagicNode [RMag] - skeleton attachment for crossbow bolts
-				// - Geometry children (Arrow:0, weapon meshes, etc.)
-				selectivePropagation(child.get());
-			}
-		};
-		
-		// Apply selective propagation from the target node
-		if (deferredOffsets.useDualClaviclePivot) {
-			RE::NiNode* rightClavicleNode = GetClavicleNode(fpNode, Hand::kRight);
-			RE::NiNode* leftClavicleNode = GetClavicleNode(fpNode, Hand::kLeft);
-			if (rightClavicleNode) selectivePropagation(rightClavicleNode);
-			if (leftClavicleNode) selectivePropagation(leftClavicleNode);
-		} else if (lastTargetNode) {
-			selectivePropagation(lastTargetNode);
-		}
+		// NO UpdateWorldData/Update calls needed - engine handles all propagation
+		// We modify local transforms BEFORE calling original, engine's Update() runs after
+		// This preserves correct previousWorld for motion vectors (TAA, upscaling, frame gen)
 
 		// Log the final skeleton inertia values for reference
 		logger::info("[FPInertia] FINAL: Skeleton inertia applied - Position: ({:.3f}, {:.3f}, {:.3f}), Rotation: ({:.3f}, {:.3f}, {:.3f})",
