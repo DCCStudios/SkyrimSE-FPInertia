@@ -190,6 +190,11 @@ namespace Inertia
 		// Frame-rate independence: previous frame velocity for clamping
 		RE::NiPoint3 prevCameraVelocity{ 0.0f, 0.0f, 0.0f };
 		
+		// Smoothed simultaneous multipliers (prevent stutter during blend transitions)
+		// Pre-applied to spring intensity so the spring state matches the displayed output
+		float smoothedCamSimultaneousMult{ 1.0f };
+		float smoothedMovSimultaneousMult{ 1.0f };
+		
 		// Current weapon tracking for preset lookup (cached for performance)
 		std::string currentWeaponEditorID;
 		WeaponType currentWeaponType{ WeaponType::Unarmed };

@@ -1614,19 +1614,53 @@ namespace Inertia
 				stanceInvertCamera ? "yes" : "no", stanceInvertMovement ? "yes" : "no");
 		}
 		
+		// *** SIMULTANEOUS BLEND: Compute scaling BEFORE spring updates ***
+		// Pre-update spring magnitudes (from previous frame) let the springs adapt
+		// naturally to the scaled target, preventing the stutter that occurred when
+		// scaling was only applied post-hoc to the combined output.
+		{
+			float camMagnitude = std::sqrt(
+				cameraSpring.positionOffset.x * cameraSpring.positionOffset.x +
+				cameraSpring.positionOffset.z * cameraSpring.positionOffset.z +
+				cameraSpring.rotationOffset.x * cameraSpring.rotationOffset.x +
+				cameraSpring.rotationOffset.z * cameraSpring.rotationOffset.z);
+			float movMagnitude = std::sqrt(
+				movementSpring.positionOffset.x * movementSpring.positionOffset.x +
+				movementSpring.positionOffset.y * movementSpring.positionOffset.y +
+				movementSpring.rotationOffset.z * movementSpring.rotationOffset.z);
+			
+			float activeThreshold = primarySettings.simultaneousThreshold;
+			constexpr float BLEND_RANGE = 1.0f;
+			
+			float camAboveThreshold = std::clamp((camMagnitude - activeThreshold) / BLEND_RANGE, 0.0f, 1.0f);
+			float movAboveThreshold = std::clamp((movMagnitude - activeThreshold) / BLEND_RANGE, 0.0f, 1.0f);
+			
+			float simultaneousBlend = camAboveThreshold * movAboveThreshold;
+			simultaneousBlend = simultaneousBlend * simultaneousBlend * (3.0f - 2.0f * simultaneousBlend);
+			
+			float targetCamSimMult = 1.0f + (primarySettings.simultaneousCameraMult - 1.0f) * simultaneousBlend;
+			float targetMovSimMult = 1.0f + (primarySettings.simultaneousMovementMult - 1.0f) * simultaneousBlend;
+			
+			// Temporal smoothing prevents abrupt mult changes when one input drops below threshold
+			constexpr float SIM_BLEND_SPEED = 8.0f;
+			float simAlpha = std::min(1.0f, SIM_BLEND_SPEED * a_delta);
+			smoothedCamSimultaneousMult += (targetCamSimMult - smoothedCamSimultaneousMult) * simAlpha;
+			smoothedMovSimultaneousMult += (targetMovSimMult - smoothedMovSimultaneousMult) * simAlpha;
+		}
+		
 		// *** UPDATE CAMERA SPRING ***
 		// Responds to camera rotation (looking around) - uses per-weapon settings
 		// Multiply intensity by equipBlendFactor so springs decay when weapon is sheathed
 		// Also apply stance multiplier for per-stance intensity adjustment
-		// This prevents built-up spring state from suddenly appearing when drawing a weapon
-		float cameraIntensity = actionBlendFactor * equipBlendFactor * stanceMultiplier;
+		// Simultaneous mult is pre-applied so the spring naturally produces scaled output
+		float cameraIntensity = actionBlendFactor * equipBlendFactor * stanceMultiplier * smoothedCamSimultaneousMult;
 		UpdateSpring(cameraSpring, primarySettings, smoothedCameraVelocity, a_delta, cameraIntensity, stanceInvertCamera);
 		
 		// *** UPDATE MOVEMENT SPRING (SEPARATE) ***
 		// Responds to player strafing - uses per-weapon movement spring settings
 		// Also uses equipBlendFactor to decay when weapon is sheathed
 		// Also apply stance multiplier for per-stance intensity adjustment
-		float movementIntensity = actionBlendFactor * equipBlendFactor * stanceMultiplier;
+		float movementIntensity = actionBlendFactor * equipBlendFactor * stanceMultiplier * smoothedMovSimultaneousMult;
 		UpdateMovementSpring(movementSpring, settings, primarySettings, smoothedLocalMovement, a_delta, movementIntensity, stanceInvertMovement);
 		
 		// *** UPDATE LEFT HAND SPRINGS (for dual clavicle pivot modes) ***
@@ -1713,63 +1747,32 @@ namespace Inertia
 		// Movement inertia is blended out while in air to prevent ground-based sway during jumps
 		// Camera inertia is dampened while in air based on cameraInertiaAirMult setting
 		// Both camera and movement inertia are also blended by equipBlendFactor during equip/holster
-		
-		// Check if both camera AND movement are active simultaneously
-		// Apply per-weapon scaling multipliers when both are active, with smooth blend
-		float camMagnitude = std::sqrt(
-			cameraSpring.positionOffset.x * cameraSpring.positionOffset.x +
-			cameraSpring.positionOffset.z * cameraSpring.positionOffset.z +
-			cameraSpring.rotationOffset.x * cameraSpring.rotationOffset.x +
-			cameraSpring.rotationOffset.z * cameraSpring.rotationOffset.z);
-		float movMagnitude = std::sqrt(
-			movementSpring.positionOffset.x * movementSpring.positionOffset.x +
-			movementSpring.positionOffset.y * movementSpring.positionOffset.y +
-			movementSpring.rotationOffset.z * movementSpring.rotationOffset.z);
-		
-		// Calculate smooth blend factors for simultaneous scaling
-		// Blend range: how far above threshold before full scaling applies
-		float activeThreshold = primarySettings.simultaneousThreshold;
-		constexpr float BLEND_RANGE = 1.0f;  // Units above threshold for full blend
-		
-		// Calculate how far above threshold each is (0 = at/below threshold, 1 = fully above blend range)
-		float camAboveThreshold = std::clamp((camMagnitude - activeThreshold) / BLEND_RANGE, 0.0f, 1.0f);
-		float movAboveThreshold = std::clamp((movMagnitude - activeThreshold) / BLEND_RANGE, 0.0f, 1.0f);
-		
-		// Both must be above threshold - use minimum as the limiting factor
-		// This means scaling only applies when BOTH are active, and blends based on the lesser one
-		float simultaneousBlend = camAboveThreshold * movAboveThreshold;
-		
-		// Smoothstep for more natural feel (ease in/out)
-		simultaneousBlend = simultaneousBlend * simultaneousBlend * (3.0f - 2.0f * simultaneousBlend);
-		
-		// Interpolate from 1.0 (no scaling) toward target mult based on blend
-		float camSimultaneousMult = 1.0f + (primarySettings.simultaneousCameraMult - 1.0f) * simultaneousBlend;
-		float movSimultaneousMult = 1.0f + (primarySettings.simultaneousMovementMult - 1.0f) * simultaneousBlend;
+		// Simultaneous scaling is already baked into the spring state via the intensity parameter
 		
 		SpringState combinedState;
 		combinedState.positionOffset = {
-			(cameraSpring.positionOffset.x * cameraAirBlend * equipBlendFactor * camSimultaneousMult) + (movementSpring.positionOffset.x * movementAirBlend * equipBlendFactor * movSimultaneousMult) + sprintSpring.positionOffset.x + jumpSpring.positionOffset.x,
-			(cameraSpring.positionOffset.y * cameraAirBlend * equipBlendFactor * camSimultaneousMult) + (movementSpring.positionOffset.y * movementAirBlend * equipBlendFactor * movSimultaneousMult) + sprintSpring.positionOffset.y + jumpSpring.positionOffset.y,
-			(cameraSpring.positionOffset.z * cameraAirBlend * equipBlendFactor * camSimultaneousMult) + (movementSpring.positionOffset.z * movementAirBlend * equipBlendFactor * movSimultaneousMult) + sprintSpring.positionOffset.z + jumpSpring.positionOffset.z
+			(cameraSpring.positionOffset.x * cameraAirBlend * equipBlendFactor) + (movementSpring.positionOffset.x * movementAirBlend * equipBlendFactor) + sprintSpring.positionOffset.x + jumpSpring.positionOffset.x,
+			(cameraSpring.positionOffset.y * cameraAirBlend * equipBlendFactor) + (movementSpring.positionOffset.y * movementAirBlend * equipBlendFactor) + sprintSpring.positionOffset.y + jumpSpring.positionOffset.y,
+			(cameraSpring.positionOffset.z * cameraAirBlend * equipBlendFactor) + (movementSpring.positionOffset.z * movementAirBlend * equipBlendFactor) + sprintSpring.positionOffset.z + jumpSpring.positionOffset.z
 		};
 		combinedState.rotationOffset = {
-			(cameraSpring.rotationOffset.x * cameraAirBlend * equipBlendFactor * camSimultaneousMult) + (movementSpring.rotationOffset.x * movementAirBlend * equipBlendFactor * movSimultaneousMult) + sprintSpring.rotationOffset.x + jumpSpring.rotationOffset.x,
-			(cameraSpring.rotationOffset.y * cameraAirBlend * equipBlendFactor * camSimultaneousMult) + (movementSpring.rotationOffset.y * movementAirBlend * equipBlendFactor * movSimultaneousMult) + sprintSpring.rotationOffset.y + jumpSpring.rotationOffset.y,
-			(cameraSpring.rotationOffset.z * cameraAirBlend * equipBlendFactor * camSimultaneousMult) + (movementSpring.rotationOffset.z * movementAirBlend * equipBlendFactor * movSimultaneousMult) + sprintSpring.rotationOffset.z + jumpSpring.rotationOffset.z
+			(cameraSpring.rotationOffset.x * cameraAirBlend * equipBlendFactor) + (movementSpring.rotationOffset.x * movementAirBlend * equipBlendFactor) + sprintSpring.rotationOffset.x + jumpSpring.rotationOffset.x,
+			(cameraSpring.rotationOffset.y * cameraAirBlend * equipBlendFactor) + (movementSpring.rotationOffset.y * movementAirBlend * equipBlendFactor) + sprintSpring.rotationOffset.y + jumpSpring.rotationOffset.y,
+			(cameraSpring.rotationOffset.z * cameraAirBlend * equipBlendFactor) + (movementSpring.rotationOffset.z * movementAirBlend * equipBlendFactor) + sprintSpring.rotationOffset.z + jumpSpring.rotationOffset.z
 		};
 		
 		// Combine left hand springs for dual clavicle pivot mode
 		SpringState combinedStateLeft;
 		if (useDualClaviclePivot) {
 			combinedStateLeft.positionOffset = {
-				(cameraSpringLeft.positionOffset.x * cameraAirBlend * equipBlendFactor * camSimultaneousMult) + (movementSpringLeft.positionOffset.x * movementAirBlend * equipBlendFactor * movSimultaneousMult) + sprintSpringLeft.positionOffset.x + jumpSpringLeft.positionOffset.x,
-				(cameraSpringLeft.positionOffset.y * cameraAirBlend * equipBlendFactor * camSimultaneousMult) + (movementSpringLeft.positionOffset.y * movementAirBlend * equipBlendFactor * movSimultaneousMult) + sprintSpringLeft.positionOffset.y + jumpSpringLeft.positionOffset.y,
-				(cameraSpringLeft.positionOffset.z * cameraAirBlend * equipBlendFactor * camSimultaneousMult) + (movementSpringLeft.positionOffset.z * movementAirBlend * equipBlendFactor * movSimultaneousMult) + sprintSpringLeft.positionOffset.z + jumpSpringLeft.positionOffset.z
+				(cameraSpringLeft.positionOffset.x * cameraAirBlend * equipBlendFactor) + (movementSpringLeft.positionOffset.x * movementAirBlend * equipBlendFactor) + sprintSpringLeft.positionOffset.x + jumpSpringLeft.positionOffset.x,
+				(cameraSpringLeft.positionOffset.y * cameraAirBlend * equipBlendFactor) + (movementSpringLeft.positionOffset.y * movementAirBlend * equipBlendFactor) + sprintSpringLeft.positionOffset.y + jumpSpringLeft.positionOffset.y,
+				(cameraSpringLeft.positionOffset.z * cameraAirBlend * equipBlendFactor) + (movementSpringLeft.positionOffset.z * movementAirBlend * equipBlendFactor) + sprintSpringLeft.positionOffset.z + jumpSpringLeft.positionOffset.z
 			};
 			combinedStateLeft.rotationOffset = {
-				(cameraSpringLeft.rotationOffset.x * cameraAirBlend * equipBlendFactor * camSimultaneousMult) + (movementSpringLeft.rotationOffset.x * movementAirBlend * equipBlendFactor * movSimultaneousMult) + sprintSpringLeft.rotationOffset.x + jumpSpringLeft.rotationOffset.x,
-				(cameraSpringLeft.rotationOffset.y * cameraAirBlend * equipBlendFactor * camSimultaneousMult) + (movementSpringLeft.rotationOffset.y * movementAirBlend * equipBlendFactor * movSimultaneousMult) + sprintSpringLeft.rotationOffset.y + jumpSpringLeft.rotationOffset.y,
-				(cameraSpringLeft.rotationOffset.z * cameraAirBlend * equipBlendFactor * camSimultaneousMult) + (movementSpringLeft.rotationOffset.z * movementAirBlend * equipBlendFactor * movSimultaneousMult) + sprintSpringLeft.rotationOffset.z + jumpSpringLeft.rotationOffset.z
+				(cameraSpringLeft.rotationOffset.x * cameraAirBlend * equipBlendFactor) + (movementSpringLeft.rotationOffset.x * movementAirBlend * equipBlendFactor) + sprintSpringLeft.rotationOffset.x + jumpSpringLeft.rotationOffset.x,
+				(cameraSpringLeft.rotationOffset.y * cameraAirBlend * equipBlendFactor) + (movementSpringLeft.rotationOffset.y * movementAirBlend * equipBlendFactor) + sprintSpringLeft.rotationOffset.y + jumpSpringLeft.rotationOffset.y,
+				(cameraSpringLeft.rotationOffset.z * cameraAirBlend * equipBlendFactor) + (movementSpringLeft.rotationOffset.z * movementAirBlend * equipBlendFactor) + sprintSpringLeft.rotationOffset.z + jumpSpringLeft.rotationOffset.z
 			};
 		}
 		
@@ -1942,6 +1945,10 @@ namespace Inertia
 		// Reset movement tracking
 		smoothedLocalMovement = { 0.0f, 0.0f, 0.0f };
 		
+		// Reset simultaneous blend smoothing
+		smoothedCamSimultaneousMult = 1.0f;
+		smoothedMovSimultaneousMult = 1.0f;
+		
 		// Reset sprint state
 		isSprinting = false;
 		wasSprinting = false;
@@ -2003,6 +2010,10 @@ namespace Inertia
 		// Reset movement tracking
 		smoothedLocalMovement = { 0.0f, 0.0f, 0.0f };
 		
+		// Reset simultaneous blend smoothing
+		smoothedCamSimultaneousMult = 1.0f;
+		smoothedMovSimultaneousMult = 1.0f;
+		
 		// Reset sprint state
 		isSprinting = false;
 		wasSprinting = false;
@@ -2056,6 +2067,10 @@ namespace Inertia
 		
 		// Reset movement tracking
 		smoothedLocalMovement = { 0.0f, 0.0f, 0.0f };
+		
+		// Reset simultaneous blend smoothing
+		smoothedCamSimultaneousMult = 1.0f;
+		smoothedMovSimultaneousMult = 1.0f;
 		
 		// Reset sprint state
 		isSprinting = false;
