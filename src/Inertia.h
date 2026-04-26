@@ -181,6 +181,7 @@ namespace Inertia
 		bool didJump{ false };             // True if player jumped (vs just falling)
 		float airTime{ 0.0f };             // Time spent in air (for landing impulse scaling)
 		float landingCooldown{ 0.0f };     // Cooldown to prevent multiple landing impulses
+		bool confirmedInAir{ false };      // Delayed air state for jump spring (filters brief physics flickers)
 		float movementAirBlend{ 1.0f };    // Blend factor for movement inertia (0 = in air, 1 = grounded)
 		float cameraAirBlend{ 1.0f };      // Blend factor for camera inertia (blends to cameraInertiaAirMult when in air)
 		SpringState jumpSpring;            // Jump/landing spring state

@@ -1576,6 +1576,18 @@ namespace Inertia
 		
 		isInAir = currentlyInAir;
 		
+		// Confirmed air state for the jump spring: ignore brief physics flickers
+		// (step-up mods, ground snap corrections) that last only 1-3 frames.
+		// Real jumps stay airborne for 0.12s+; flickers are typically < 0.05s.
+		constexpr float kMinAirTimeForJumpSpring = 0.12f;
+		bool prevConfirmedInAir = confirmedInAir;
+		if (currentlyInAir && airTime >= kMinAirTimeForJumpSpring) {
+			confirmedInAir = true;
+		} else if (!currentlyInAir) {
+			confirmedInAir = false;
+		}
+		bool confirmedLanding = landingDetected && prevConfirmedInAir;
+		
 		// Blend movement inertia out while in air, back in when grounded
 		constexpr float AIR_BLEND_SPEED = 8.0f;  // How fast to blend in/out
 		float airBlendTarget = isInAir ? 0.0f : 1.0f;
@@ -1721,7 +1733,8 @@ namespace Inertia
 		
 		// *** UPDATE JUMP SPRING ***
 		// Applies impulse on jump and landing with air time scaling
-		UpdateJumpSpring(jumpSpring, primarySettings, isInAir, wasInAir, didJump, airTime, landingDetected,
+		// Uses confirmedInAir (delayed) state to filter brief physics flickers
+		UpdateJumpSpring(jumpSpring, primarySettings, confirmedInAir, prevConfirmedInAir, didJump, airTime, confirmedLanding,
 			currentJumpStiffness, currentJumpDamping, a_delta);
 		
 		// Update left hand sprint and jump springs for dual clavicle pivot mode
@@ -1738,7 +1751,7 @@ namespace Inertia
 			// Left hand jump spring
 			float jumpStiffnessLeft = currentJumpStiffness;
 			float jumpDampingLeft = currentJumpDamping;
-			UpdateJumpSpring(jumpSpringLeft, primarySettings, isInAir, wasInAir, didJump, airTime, landingDetected,
+			UpdateJumpSpring(jumpSpringLeft, primarySettings, confirmedInAir, prevConfirmedInAir, didJump, airTime, confirmedLanding,
 				jumpStiffnessLeft, jumpDampingLeft, a_delta);
 		}
 		
@@ -1960,6 +1973,7 @@ namespace Inertia
 		// Reset jump state
 		isInAir = false;
 		wasInAir = false;
+		confirmedInAir = false;
 		didJump = false;
 		airTime = 0.0f;
 		landingCooldown = 0.0f;
@@ -2025,6 +2039,7 @@ namespace Inertia
 		// Reset jump state
 		isInAir = false;
 		wasInAir = false;
+		confirmedInAir = false;
 		didJump = false;
 		airTime = 0.0f;
 		landingCooldown = 0.0f;
@@ -2083,6 +2098,7 @@ namespace Inertia
 		// Reset jump state
 		isInAir = false;
 		wasInAir = false;
+		confirmedInAir = false;
 		didJump = false;
 		airTime = 0.0f;
 		landingCooldown = 0.0f;
